@@ -493,7 +493,8 @@ impl EncodeLtd for Publish {
                 .ok_or(ParseError::PacketIdRequired)?
                 .encode(buf)?;
         }
-        self.properties.encode(buf, size - (buf.len() + self.payload.len()) as u32)?;
+        self.properties
+            .encode(buf, size - (buf.len() + self.payload.len()) as u32)?;
         buf.put(self.payload.as_ref());
         Ok(())
     }
@@ -869,8 +870,7 @@ mod tests {
 
         assert_eq!(p.encoded_size(MAX_PACKET_SIZE), 0);
         p.encode(&mut v, 0).unwrap();
-        // write_fixed_header(&p, &mut v, 0);
-        assert_eq!(v, b"\xc0\x00".as_ref());
+        assert_eq!(&v[..2], b"\xc0\x00".as_ref());
 
         v.clear();
 
@@ -881,17 +881,19 @@ mod tests {
             topic: ByteString::from_static("topic"),
             packet_id: Some(packet_id(0x4321)),
             payload: (0..255).collect::<Vec<u8>>().into(),
+            properties: PublishProperties::default(),
         });
 
-        assert_eq!(get_encoded_size(&p), 264);
-        write_fixed_header(&p, &mut v, 264);
-        assert_eq!(v, b"\x3d\x88\x02".as_ref());
+        assert_eq!(p.encoded_size(MAX_PACKET_SIZE), 264);
+        p.encode(&mut v, 264);
+        assert_eq!(&v[..3], b"\x3d\x88\x02".as_ref());
     }
 
     macro_rules! assert_packet {
         ($p:expr, $data:expr) => {
             let mut v = BytesMut::with_capacity(1024);
-            write_packet(&$p, &mut v, get_encoded_size($p));
+            let x = $p;
+            x.encode(&mut v, x.encoded_size(1024));
             assert_eq!(v.len(), $data.len());
             assert_eq!(v, &$data[..]);
             // assert_eq!(read_packet($data.cursor()).unwrap(), (&b""[..], $p));
@@ -909,6 +911,15 @@ mod tests {
                 last_will: None,
                 username: Some(ByteString::from_static("user")),
                 password: Some(Bytes::from_static(b"pass")),
+                session_expiry_interval_secs: None,
+                auth_method: None,
+                auth_data: None,
+                request_problem_info: None,
+                request_response_info: None,
+                receive_max: None,
+                topic_alias_max: 0,
+                user_properties: vec!(),
+                max_packet_size: None,
             }),
             &b"\x10\x1D\x00\x04MQTT\x04\xC0\x00\x3C\x00\
 \x0512345\x00\x04user\x00\x04pass"[..]
@@ -925,15 +936,37 @@ mod tests {
                     retain: false,
                     topic: ByteString::from_static("topic"),
                     message: Bytes::from_static(b"message"),
+                    will_delay_interval_sec: None,
+                    correlation_data: None,
+                    message_expiry_interval: None,
+                    content_type: None,
+                    user_properties: vec!(),
+                    is_utf8_payload: None,
+                    response_topic: None,
                 }),
                 username: None,
                 password: None,
+                session_expiry_interval_secs: None,
+                auth_method: None,
+                auth_data: None,
+                request_problem_info: None,
+                request_response_info: None,
+                receive_max: None,
+                topic_alias_max: 0,
+                user_properties: vec!(),
+                max_packet_size: None,
             }),
             &b"\x10\x21\x00\x04MQTT\x04\x14\x00\x3C\x00\
 \x0512345\x00\x05topic\x00\x07message"[..]
         );
 
-        assert_packet!(&Packet::Disconnect, b"\xe0\x00");
+        assert_packet!(&Packet::Disconnect(Disconnect {
+            reason_code: DisconnectReasonCode::NormalDisconnection,
+            session_expiry_interval_secs: None,
+            server_reference: None,
+            reason_string: None,
+            user_properties: vec!(),
+        }), b"\xe0\x00");
     }
 
     #[test]
@@ -946,6 +979,7 @@ mod tests {
                 topic: ByteString::from_static("topic"),
                 packet_id: Some(packet_id(0x4321)),
                 payload: Bytes::from_static(b"data"),
+                properties: PublishProperties::default()
             }),
             b"\x3d\x0D\x00\x05topic\x43\x21data"
         );
@@ -958,6 +992,7 @@ mod tests {
                 topic: ByteString::from_static("topic"),
                 packet_id: None,
                 payload: Bytes::from_static(b"data"),
+                properties: PublishProperties::default()
             }),
             b"\x30\x0b\x00\x05topicdata"
         );
